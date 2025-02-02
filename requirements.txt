@@ -1,0 +1,7 @@
+fastapi==0.115.8
+openai==1.60.2
+pymongo==4.11
+python-dotenv==1.0.1
+PyYAML==6.0.2
+uvicorn==0.34.0
+
