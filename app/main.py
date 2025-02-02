@@ -2,8 +2,8 @@ from typing import Union
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from shiroko.api import router
-from shiroko.settings import *
+from app.api import router
+from app.settings import *
 from bson import ObjectId
 
 app = FastAPI(debug=True,redirect_slashes=False,title='Shiroko Backend')

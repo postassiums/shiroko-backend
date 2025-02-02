@@ -13,7 +13,7 @@ class Id(BaseModel):
     id: PydanticObjectId=Field(alias='_id')  
     
 class Conversation(BaseModel):
-    role: t.Literal['user','developer','assistent']
+    role: t.Literal['user','developer','assistent']='user'
     content: str | list[str]
     created_at: datetime=Field(default_factory=lambda : datetime.now(tz=timezone.utc))
     
@@ -23,7 +23,7 @@ class Conversation(BaseModel):
         fields['_id']={"$toString": "$_id"}
         return fields
 
-class UpdateConversation(Conversation):
+class ConversationBody(Conversation):
     created_at: t.Optional[datetime]=Field(default_factory=lambda : datetime.now(tz=timezone.utc))
 
   
