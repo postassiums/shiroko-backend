@@ -5,7 +5,7 @@ import pymongo.database
 import pymongo.errors
 import typing as t
 from fastapi import Depends,HTTPException
-from shiroko.logger import *
+from app.logger import *
 
     
     
