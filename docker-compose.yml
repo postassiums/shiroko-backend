@@ -1,0 +1,36 @@
+name: shiroko
+services:
+  backend:
+    container_name: shiroko-backend
+    build:
+      context: .
+    volumes:
+      - .:/app
+    ports:
+      - $PORT:$PORT
+    networks: [shiroko-net]
+    environment:
+      TZ: $TZ
+    depends_on:
+      - database
+
+  database:
+    image: mongo
+    container_name: $DB_HOST
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: $DB_USER
+      MONGO_INITDB_ROOT_PASSWORD: $DB_PASSWORD
+      TZ: $TZ
+    ports:
+      - $DB_PORT:$DB_PORT
+    volumes:
+      - mongo_volume:/data/db
+    networks: [shiroko-net]
+      
+
+volumes:
+  mongo_volume:
+    name: shiroko_db
+networks:
+  shiroko-net:
+    name: shiroko-net
