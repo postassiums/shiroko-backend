@@ -4,4 +4,8 @@ pymongo==4.11
 python-dotenv==1.0.1
 PyYAML==6.0.2
 uvicorn==0.34.0
+minio==7.2.15
+edge_tts==7.0.0
+rvc-python==0.1.5
+debugpy==1.8.0
 
