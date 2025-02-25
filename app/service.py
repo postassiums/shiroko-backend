@@ -39,8 +39,11 @@ class ConversationService():
         target_id=ObjectId(id)
         return self.conversations.update_one({"_id": target_id },{'$set': data.model_dump()})
 
-        
+    def delete_voice(self,id :str):
+        return self.conversations.update_one({'_id': ObjectId(id)},{'$set': {'voice': None}})  
 
+    def delete(self, id : str):
+        return self.conversations.delete_one({'_id': ObjectId(id)})
     
     def get_specific_conversation(self, id : str):
         fields=Conversation.get_projected_fields()
@@ -351,6 +354,11 @@ class StorageService():
         result=self._putTTSVoice(id,buffer,length,tts_service.get_mime_type(),'normal')
         tts_service.close_buffer()
         return result
+    
+    def deleteVoice(self, id : str):
+        for voice in t.get_args(VoiceType):
+            self._client.remove_object(self.Buckets.TTS.value,f'{id}/{voice}')
+            
     
     async def putRVCTTSVoice(self, rvc_service : RVCService,tts_service : OpenAITTSService,id : str):
         audio,_=tts_service.to_buffer()
