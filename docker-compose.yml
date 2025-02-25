@@ -6,7 +6,7 @@ services:
     build:
       target: rvc-api
       context: .
-    command: -p $RVC_PORT -pi 8
+    command: -p $RVC_PORT -pi 4
     ports:
       - $RVC_PORT:$RVC_PORT
     networks: [ shiroko-net ]
