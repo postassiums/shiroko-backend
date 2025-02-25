@@ -12,9 +12,7 @@ from app.params import *
 
 router=APIRouter(prefix='/audio',tags=['Audio Endpoints'],redirect_slashes=False)
 
-# @router.post('/shiroko')
-# async def create_new_audio(voice_service : VoiceService):
-#     return PlainTextResponse('worked')
+
 
 @router.post('/openai/tts',response_model=None)
 async def convert_text_to_speech_using_openai(voice_service : OpenAITTSDependency):

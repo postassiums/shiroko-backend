@@ -60,30 +60,35 @@ async def update_existing_conversation_by_id(conversation_service : Conversation
     return ConversationWithId(**found_conversation).model_dump()
 
 @router.post('/{id}/audio')
-async def include_audio_into_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
-
+async def include_audio_into_conversation(conversation_service : ConversationServiceDependency,
+    storage_service : StorageServiceDependency,rvc_service : RVCDependency,id : str):
     found_conversation=conversation_service.get_specific_conversation(id)
     if found_conversation==False:
         return HTTPException(404,detail={'message': 'Conversation does not exist'})
     found_conversation=ConversationWithId(**found_conversation)
-    if found_conversation.has_voice() and found_conversation.voice.has_expired():
-        found_conversation.voice.update(storage_service.getAudioUrl(id),storage_service.getNewExpirationDate())
+    if found_conversation.has_voice() and found_conversation.voice.rvc_expired():
+        new_rvc=MinioItem(url=storage_service.getRVCVoiceURL(id),expires_at=storage_service.getNewExpirationDate())
+        found_conversation.voice.update_rvc(new_rvc)
         
     if found_conversation.has_voice():
         return found_conversation.model_dump()
     tts=OpenAITTSService(OpenAITTSBody(content=found_conversation.content))
-    buffer=io.BytesIO()
-    for chunk in tts.tts_stream():
-        buffer.write(chunk)
-   
-    length=buffer.tell()
-    buffer.seek(0)
-    result=storage_service.putAudioObject(id,buffer,length,tts.get_mime_type())
-    buffer.close()
-    download_url=storage_service.getAudioUrl(id)
+    storage_service.putNormalTTSVoice(tts,id)
+
+    await rvc_service.load_model()
+    await storage_service.putRVCTTSVoice(rvc_service,tts,id)
+ 
+    normal_tts_download_url=storage_service.getNormalVoiceURL(id)
+    rvc_tts_download_url=storage_service.getRVCVoiceURL(id)
     updated_conversation=UpdateConversation(**found_conversation.model_dump(exclude=['id','updated_at']))
-    updated_conversation.voice=Voice(url=download_url,expires_at= datetime.now(tz=timezone.utc)+StorageService.EXPIRE_IN)
+    new_normal_tts=MinioItem(url=normal_tts_download_url,expires_at= StorageService.getNewExpirationDate())
+    new_rvc_tts=MinioItem(url=rvc_tts_download_url,expires_at=StorageService.getNewExpirationDate())
+    
+    updated_conversation.update_voice(new_normal_tts,new_rvc_tts)
+
+    
     result=conversation_service.update(id,updated_conversation)
+    await rvc_service.close()
     if not result.acknowledged:
         return HTTPException(500,detail={'message': 'Failed to update'})
 
@@ -105,14 +110,7 @@ async def retrieve_conversation_by_id(conversation_service : ConversationService
         return HTTPException(500)     
 
     
-# @router.post('/{id}/audio')
-# async def create_audio_from_conversatio_content(conversation_service : ConversationServiceDependency,id : str):
-#     # target_conversation=conversation_service.get_specific_conversation(id)
-#     # if target_conversation==False:
-#     #     return HTTPException(404)
-#     # content=target_conversation.get('content')
-#     voice_service=VoiceService()
-#     voice_service.tts('teste')
+
     
 
 

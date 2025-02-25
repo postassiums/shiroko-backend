@@ -1,5 +1,34 @@
 name: shiroko
 services:
+
+  rvc:
+    container_name: $RVC_HOST
+    build:
+      target: rvc-api
+      context: .
+    command: -p $RVC_PORT -pi 8
+    ports:
+      - $RVC_PORT:$RVC_PORT
+    networks: [ shiroko-net ]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  queue:
+    container_name: $RABBITMQ_HOST
+    image: rabbitmq:3
+    environment:
+      RABBITMQ_DEFAULT_USER: $RABBITMQ_USER
+      RABBITMQ_DEFAULT_PASSWORD: $RABBITMQ_PASSWORD
+      RABBITMQ_NODE_PORT: $RABBITMQ_PORT
+    ports:
+      - $RABBITMQ_PORT:$RABBITMQ_PORT
+    volumes:
+      - rabbitmq_volume:/var/lib/rabbitmq
+
   backend:
     container_name: shiroko-backend
     restart: always
@@ -14,17 +43,12 @@ services:
     networks: [shiroko-net]
     environment:
       TZ: $TZ
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    
     
     depends_on:
       - database
       - storage
+      - rvc
 
   database:
     image: mongo
@@ -60,6 +84,8 @@ volumes:
     name: shiroko_db
   minio_volume:
     name: shiroko_minio
+  rabbitmq_volume:
+    name: shiroko_rabbitmq
 networks:
   shiroko-net:
     name: shiroko-net

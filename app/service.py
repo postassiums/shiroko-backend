@@ -14,7 +14,6 @@ from fastapi import Query
 import httpx
 import edge_tts
 from dotenv import load_dotenv
-from rvc_python.infer import RVCInference
 from minio import Minio
 import tempfile
 import abc
@@ -218,6 +217,7 @@ class OpenAITTSService(ChatGPT,TTSBase):
         self.speed=body.speed
         self.audio_format=body.format
         self.content=body.content
+        self.buffer=None
         
     def get_mime_type(self):
         mime_type_dict={
@@ -232,7 +232,26 @@ class OpenAITTSService(ChatGPT,TTSBase):
     def _voice_exists(self):
         return self.voice in t.get_args(OpenAITTSVoices)
 
+    def get_complete_tts_buffer(self):
+        normal_tts_buffer=io.BytesIO()
+        for chunk in self.tts_stream():
+            normal_tts_buffer.write(chunk)
+        length=normal_tts_buffer.getbuffer().nbytes
+        normal_tts_buffer.seek(0)
+        return (normal_tts_buffer,length)
     
+    def to_buffer(self):
+        if self.buffer is not None and self.buffer.closed:
+            self.close_buffer()
+        self.buffer=io.BytesIO()
+        for chunk in self.tts_stream():
+            self.buffer.write(chunk)
+        length=self.buffer.getbuffer().nbytes
+        self.buffer.seek(0)
+        return (self.buffer,length)
+    
+    def close_buffer(self):
+        self.buffer.close()
     
     def tts_stream(self):
         response=self.client.audio.speech.create(model=self.model,voice=self.voice,input=self.content,speed=self.speed,response_format=self.audio_format)
@@ -240,34 +259,61 @@ class OpenAITTSService(ChatGPT,TTSBase):
             yield chunk
     
 
-class VoiceService():
-    
-    __instance__=None
-    
-    def __new__(cls) :
-        if cls.__instance__ is None:
-            cls.__instance__=super().__new__(cls)
-            cls.__instance__._initialize()
-            
-        
-        
-        return cls.__instance__
-        
-    def _initialize(self):
-        try:
-            self.rvc=RVCInference()
-            self.rvc.load_model(self.rvc.list_models()[0])
-        except Exception as e:
-            critical(e)
-            raise HTTPException(500,detail='Failed to load models')
+
         
 
 
-RVCServiceDependency=t.Annotated[VoiceService,Depends(VoiceService)] 
 AudioType=t.Literal['rvc','tts']
+VoiceType=t.Literal['normal','rvc']
+
+class RVCService():
+    
+
+   
+    
+    def __init__(self):
+        HOST=os.getenv('RVC_HOST')
+        PORT=os.getenv('RVC_PORT')
+        self.URL=f'http://{HOST}:{PORT}'
+        self.client=httpx.AsyncClient(base_url=self.URL)
+
+    @staticmethod
+    async def get_rvc_service():
+        rvc= RVCService()
+        try:
+            yield rvc
+        finally:
+            await rvc.close()
+    
+    async def load_model(self,model_name : str='shiroko'):
+
+        response=await self.client.post(f'/models/{model_name}')
+        response.raise_for_status()
+        return response.text
+    
+    async def convert_file(self ,audio : io.BytesIO):
+        
+        response=await self.client.post('/convert_file',files={'file': audio},timeout=60*5)
+        mime_type=response.headers.get('content-type')
+        buffer=io.BytesIO()
+        buffer.write(response.content)
+        buffer.seek(0)
+        return (buffer,buffer.getbuffer().nbytes,mime_type)
+    
+    async def close(self):
+        await self.client.aclose()
+        
+
 class StorageService():
     class Buckets(Enum):
+        
+        VIDEOS='videos'
         AUDIOS='audios'
+        TTS='tts'
+        
+        @classmethod
+        def getVoiceBucketName(cls,id : str):
+            return f'{cls.TTS}/{id}'
         
     EXPIRE_IN=timedelta(days=7)
         
@@ -276,10 +322,9 @@ class StorageService():
             HOST=f"{os.getenv('MINIO_HOST')}:9000"
             ACCESS_KEY=os.getenv('MINIO_ACCESS_KEY')
             SECRET_KEY=os.getenv('MINIO_SECRET_KEY')
-            
             self._client=Minio(HOST,ACCESS_KEY,SECRET_KEY,secure=False)
-            if not(self._client.bucket_exists(self.Buckets.AUDIOS.value)):
-                self._client.make_bucket(self.Buckets.AUDIOS.value)
+            self._createBucketsIfNeeded()
+        
         except Exception as e:
             
             critical(e)
@@ -287,20 +332,46 @@ class StorageService():
     @classmethod 
     def getNewExpirationDate(cls):
         return datetime.now(tz=timezone.utc)+cls.EXPIRE_IN
-        
-            
+    
+    def _createBucketsIfNeeded(self):   
+
+        for bucket in self.Buckets:
+            if not(self._client.bucket_exists(bucket.value)):
+                self._client.make_bucket(bucket.value) 
     def getClient(self):
         return self._client
     
-    def putAudioObject(self,id : str,audio : io.BytesIO,length : int, mime_type : str):
-        result=self._client.put_object(f'{self.Buckets.AUDIOS.value}',id,audio,length=length,content_type=mime_type)
+    def _putTTSVoice(self,id : str,audio : io.BytesIO,length : int, mime_type : str,voice_type : VoiceType):
+        dest=f'{id}/{voice_type}'
+        result=self._client.put_object(f'{self.Buckets.TTS.value}',dest,audio,length=length,content_type=mime_type)
         return result
     
-    def getAudioUrl(self, id: str):
-        return self._client.presigned_get_object(self.Buckets.AUDIOS.value,id,expires=self.EXPIRE_IN)
+    def putNormalTTSVoice(self,tts_service : OpenAITTSService | EdgeTTSService,id : str):
+        buffer,length=tts_service.to_buffer()
+        result=self._putTTSVoice(id,buffer,length,tts_service.get_mime_type(),'normal')
+        tts_service.close_buffer()
+        return result
+    
+    async def putRVCTTSVoice(self, rvc_service : RVCService,tts_service : OpenAITTSService,id : str):
+        audio,_=tts_service.to_buffer()
+        rvc_audio,rvc_audio_length,mime_type=await rvc_service.convert_file(audio)
+        self._putTTSVoice(id,rvc_audio,rvc_audio_length,mime_type,'rvc')
+        rvc_audio.close()
+        tts_service.close_buffer()
+    
+    def _getVoiceURL(self, id: str,voice_type : VoiceType):
+        dest=f'{id}/{voice_type}'
+        return self._client.presigned_get_object(self.Buckets.TTS.value,dest,expires=self.EXPIRE_IN)
+    
+    def getNormalVoiceURL(self, id : str):
+        return self._getVoiceURL(id,'normal')
+    
+    def getRVCVoiceURL(self, id: str):
+        return self._getVoiceURL(id,'rvc')
     
     
     
+
         
         
 StorageServiceDependency=t.Annotated[StorageService,Depends(StorageService)]
@@ -312,6 +383,12 @@ StorageServiceDependency=t.Annotated[StorageService,Depends(StorageService)]
 
 OpenAITTSDependency=t.Annotated[OpenAITTSService,Depends(OpenAITTSService)]
 EdgeTTSDependency=t.Annotated[EdgeTTSService,Depends(EdgeTTSService)]
+
+
+        
+    
+
+RVCDependency=t.Annotated[RVCService,Depends(RVCService.get_rvc_service)]
 
 
             
