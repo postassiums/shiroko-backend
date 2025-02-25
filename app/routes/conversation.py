@@ -1,5 +1,5 @@
 from fastapi import APIRouter,HTTPException,Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse,JSONResponse
 from app.service import *
 from app.database import databaseDependency,get_collection
 from app.logger import *
@@ -107,7 +107,33 @@ async def retrieve_conversation_by_id(conversation_service : ConversationService
         
     except Exception as e:
         error(e)
-        return HTTPException(500)     
+        return HTTPException(500)    
+    
+
+@router.delete('/{id}/audio')
+async def delete_only_voice_associated_with_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
+    current_conversation=conversation_service.get_specific_conversation(id)
+    if current_conversation==False:
+        return JSONResponse(status_code=404,content={'detail': 'Conversation was not found'})
+    if not(ConversationWithId(**current_conversation).has_voice()):
+        return JSONResponse(status_code=404,content={'detail': 'There is not voice associated with this conversation'})
+    storage_service.deleteVoice(id)
+    conversation_service.delete_voice(id)
+    
+    
+    return JSONResponse(status_code=204,content={'detail': 'Voice was deleted'})
+    
+        
+    
+@router.delete('/{id}')
+async def delete_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
+    result=conversation_service.delete(id)
+    if result.deleted_count==0:
+        raise HTTPException(500,detail={'message': 'Failed to delete conversation'})
+    return JSONResponse(status_code=404,content={'detail': 'Conversation deleted'})
+
+
+     
 
     
 
