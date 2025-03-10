@@ -1,16 +1,18 @@
 
 from fastapi import APIRouter,HTTPException,Query
 from fastapi.responses import StreamingResponse,PlainTextResponse,FileResponse
-from app.service import *
+
+from app.services.queue import QueueServiceDependency
+from app.services.tts import *
 from app.database import databaseDependency,get_collection
 from app.logger import *
-from app.schema import *
 from pprint import pprint
 from app.params import *
 
 
 
 router=APIRouter(prefix='/audio',tags=['Audio Endpoints'],redirect_slashes=False)
+
 
 
 

@@ -11,6 +11,19 @@ RUN pip3 install --upgrade pip && pip3 install -r requirements.txt
 
 ENTRYPOINT pip3 install -r requirements.txt && python3 -Xfrozen_modules=off .
 
+FROM backend as rvc_consumer
+
+ENTRYPOINT pip3 install -r requirements.txt && python3 -Xfrozen_modules=off consumer.py rvc
+
+FROM backend as tts_splitter
+
+ENTRYPOINT pip3 install -r requirements.txt && python3 -Xfrozen_modules=off consumer.py tts_splitter
+
+FROM backend as tts_consumer
+
+ENTRYPOINT pip3 install -r requirements.txt && python3 -Xfrozen_modules=off consumer.py tts
+
+
 
 FROM python:3.10 as rvc-api
 

@@ -1,10 +1,64 @@
 name: shiroko
-services:
 
+x-consumer-app: &consumer-app
+  volumes:
+    - .:/app
+  networks: [ shiroko-net ]
+  environment:
+    TZ: $TZ
+services:
+  tts_splitter:
+    <<: *consumer-app
+    container_name: tts_splitter_consumer
+    hostname: tts.splitter
+    image: tts_splitter
+    depends_on:
+      queue:
+        condition: service_healthy
+
+        
+    networks:
+      - shiroko-net
+
+    
+  tts_consumer:
+    <<: *consumer-app
+    container_name: tts_consumer
+    image: tts_consumer
+    hostname: tts.consumer
+    depends_on:
+      tts_splitter:
+        condition: service_started
+
+      queue:
+        condition: service_healthy
+    # ports:
+    #   - $DEBUGGER_PORT:$DEBUGGER_PORT
+
+    networks:
+      - shiroko-net
+
+  rvc_consumer:
+    <<: *consumer-app
+    container_name: rvc_consumer
+    hostname: rvc.consumer
+    image: rvc_consumer
+    depends_on:
+      tts_consumer:
+        condition: service_started
+      rvc:
+        condition: service_started
+      queue:
+        condition: service_healthy
+
+    networks:
+      - shiroko-net
+  
   rvc:
     container_name: $RVC_HOST
+    hostname: shiroko.rvc
+    image: rvc-api
     build:
-      target: rvc-api
       context: .
     command: -p $RVC_PORT -pi 4
     ports:
@@ -19,19 +73,25 @@ services:
               capabilities: [gpu]
   queue:
     container_name: $RABBITMQ_HOST
-    image: rabbitmq:3
+    hostname: shiroko.rabbit
+    image: rabbitmq:3-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: $RABBITMQ_USER
-      RABBITMQ_DEFAULT_PASSWORD: $RABBITMQ_PASSWORD
+      RABBITMQ_DEFAULT_PASS: $RABBITMQ_PASSWORD
       RABBITMQ_NODE_PORT: $RABBITMQ_PORT
     ports:
       - $RABBITMQ_PORT:$RABBITMQ_PORT
+      - '15672:15672'
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
     volumes:
       - rabbitmq_volume:/var/lib/rabbitmq
+    networks: [shiroko-net]
 
   backend:
     container_name: shiroko-backend
     restart: always
+    hostname: shiroko.backend
     build:
       target: backend
       context: .
@@ -52,6 +112,7 @@ services:
 
   database:
     image: mongo
+    hostname: shiroko.db
     container_name: $DB_HOST
     environment:
       MONGO_INITDB_ROOT_USERNAME: $DB_USER
@@ -63,6 +124,7 @@ services:
       - mongo_volume:/data/db
     networks: [shiroko-net]
   storage:
+    hostname: shiroko.minio
     image: minio/minio
     command: server /data --console-address ":$MINIO_WEBUI_PORT"
     container_name: $MINIO_HOST
@@ -75,8 +137,8 @@ services:
     volumes:
       - minio_volume:/data
     ports:
-      - 9000:9000
-      - 9001:9001
+      - '9000:9000'
+      - '9001:9001'
       
 
 volumes:

@@ -1,9 +1,16 @@
 from fastapi import APIRouter,HTTPException,Query
 from fastapi.responses import StreamingResponse,JSONResponse
-from app.service import *
+from app.services.conversation import ConversationServiceDependency
+from app.services.queue import QueueServiceDependency
+from app.services.llm import LLMService
 from app.database import databaseDependency,get_collection
-from app.logger import *
-from app.schema import *
+from app.schema.llm import UserPrompt
+from app.schema.tts import OpenAITTSBody
+from app.schema.minio import MinioItemPart
+from app.schema.conversation import CreateConversation,ConversationWithId,UpdateConversation
+from app.services.storage import StorageServiceDependency
+from app.services.tts import OpenAITTSService
+from app.logger import LOGGER
 from app.params import PaginationDependency
 import io
 from app.debug import *
@@ -21,24 +28,29 @@ async def send_prompt_to_llm(prompt: UserPrompt):
         
         return StreamingResponse(stream,media_type='text/event-stream; charset=utf-8')
     except Exception as e:
-        error('Failed to prompt AI')
-        error(e)
+        LOGGER.error('Failed to prompt AI')
+        LOGGER.error(e)
         return HTTPException(500,detail={"message": "Failed to prompt AI"})
     
     
     
 @router.post('',description='Create new conversation')
-async def create_new_conversation(conversation_service : ConversationServiceDependency,conversation : CreateConversation):
+async def create_new_conversation(conversation_service : ConversationServiceDependency,
+  conversation : CreateConversation, queue : QueueServiceDependency):
     try:
         result=conversation_service.create(conversation)
         if result==False:
             return HTTPException(404)
-        return result
+        queue.dispatch_tts_splitter_job(result)
+        return result.model_dump(by_alias=True)
     except Exception as e:
-        error(e)
-        error('Failed to create new conversation')
+        LOGGER.error(e)
+        LOGGER.error('Failed to create new conversation')
         return HTTPException(500,detail={'message': 'fail'})
-    
+
+
+
+
 @router.get('',description='List all Conversations')
 async def list_all_conversations(conversation_service : ConversationServiceDependency,pagination : PaginationDependency ):
     try:
@@ -46,7 +58,7 @@ async def list_all_conversations(conversation_service : ConversationServiceDepen
         return conversation_service.list_paginated(page,limit)
         
     except Exception as e:
-        error(e)
+        LOGGER.error(e)
         return HTTPException(500)
 
 
@@ -57,43 +69,9 @@ async def update_existing_conversation_by_id(conversation_service : Conversation
     conversation_service.update(id,new_data)
 
     found_conversation=conversation_service.get_specific_conversation(id)
-    return ConversationWithId(**found_conversation).model_dump()
+    return found_conversation.model_dump(by_alias=True)
 
-@router.post('/{id}/audio')
-async def include_audio_into_conversation(conversation_service : ConversationServiceDependency,
-    storage_service : StorageServiceDependency,rvc_service : RVCDependency,id : str):
-    found_conversation=conversation_service.get_specific_conversation(id)
-    if found_conversation==False:
-        return HTTPException(404,detail={'message': 'Conversation does not exist'})
-    found_conversation=ConversationWithId(**found_conversation)
-    if found_conversation.has_voice() and found_conversation.voice.rvc_expired():
-        new_rvc=MinioItem(url=storage_service.getRVCVoiceURL(id),expires_at=storage_service.getNewExpirationDate())
-        found_conversation.voice.update_rvc(new_rvc)
-        
-    if found_conversation.has_voice():
-        return found_conversation.model_dump()
-    tts=OpenAITTSService(OpenAITTSBody(content=found_conversation.content))
-    storage_service.putNormalTTSVoice(tts,id)
 
-    await rvc_service.load_model()
-    await storage_service.putRVCTTSVoice(rvc_service,tts,id)
- 
-    normal_tts_download_url=storage_service.getNormalVoiceURL(id)
-    rvc_tts_download_url=storage_service.getRVCVoiceURL(id)
-    updated_conversation=UpdateConversation(**found_conversation.model_dump(exclude=['id','updated_at']))
-    new_normal_tts=MinioItem(url=normal_tts_download_url,expires_at= StorageService.getNewExpirationDate())
-    new_rvc_tts=MinioItem(url=rvc_tts_download_url,expires_at=StorageService.getNewExpirationDate())
-    
-    updated_conversation.update_voice(new_normal_tts,new_rvc_tts)
-
-    
-    result=conversation_service.update(id,updated_conversation)
-    await rvc_service.close()
-    if not result.acknowledged:
-        return HTTPException(500,detail={'message': 'Failed to update'})
-
-        
-    return ConversationWithId(**updated_conversation.model_dump(),id=id).model_dump(by_alias=True)
 
     
 @router.get('/{id}',response_model=ConversationWithId)
@@ -103,14 +81,14 @@ async def retrieve_conversation_by_id(conversation_service : ConversationService
        
         if conversation==False:
             return HTTPException(400,detail={'message': 'Conversation was not found'})
-        return conversation
+        return conversation.model_dump(by_alias=True)
         
     except Exception as e:
-        error(e)
+        LOGGER.error(e)
         return HTTPException(500)    
     
 
-@router.delete('/{id}/audio')
+@router.delete('/{id}/audio',response_model=None)
 async def delete_only_voice_associated_with_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
     current_conversation=conversation_service.get_specific_conversation(id)
     if current_conversation==False:
@@ -123,7 +101,7 @@ async def delete_only_voice_associated_with_conversation(conversation_service : 
     
     return JSONResponse(status_code=204,content={'detail': 'Voice was deleted'})
     
-        
+
     
 @router.delete('/{id}')
 async def delete_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
@@ -133,9 +111,16 @@ async def delete_conversation(conversation_service : ConversationServiceDependen
     return JSONResponse(status_code=404,content={'detail': 'Conversation deleted'})
 
 
-     
+@router.post('/{id}/voice')
+async def dispatch_tts_job(conversation_service : ConversationServiceDependency,queue_service : QueueServiceDependency,id : str):
+    result=conversation_service.get_specific_conversation(id)
+    if result==False:
+        raise HTTPException(404,detail={'message': 'Conversation was not found'})   
+    queue_service.dispatch_tts_splitter_job(result)   
+    return {'message': 'Conversation job dispatched'}
 
     
+
 
     
 
