@@ -33,6 +33,9 @@ class ConversationService():
     def delete(self, id : str):
         return self.conversations.delete_one({'_id': ObjectId(id)})
     
+    def delete_all(self):
+        return self.conversations.delete_many({},{})
+    
     # def renovate_voice(self,storage_service : StorageService):
     #     new_tts=MinioItem(url=storage_service.getNormalVoiceURL(id),expires_at=storage_service.getNewExpirationDate())
     #     found_conversation.voice.update_normal_tts(new_tts)

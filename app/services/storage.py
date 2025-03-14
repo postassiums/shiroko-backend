@@ -5,14 +5,13 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from app.database import *
 from math import ceil
 from enum import Enum
-from fastapi import Query
-from dotenv import load_dotenv
 from minio import Minio
+from minio.deleteobjects import DeleteObject
 import io
-
+from datetime import timedelta
 from app.services.rvc import *
 from app.services.tts import OpenAITTSService,EdgeTTSService
-from app.schema.minio import MinioItemPart
+from app.schema.minio import MinioItem
 from datetime import *
 from app.logger import LOGGER
 
@@ -57,10 +56,10 @@ class StorageService():
         for bucket in self.Buckets:
             if not(self._client.bucket_exists(bucket.value)):
                 self._client.make_bucket(bucket.value) 
-    def getClient(self):
+    def get_client(self):
         return self._client
     
-    def _putTTSVoice(self,id : str,new_audio : bytes, mime_type : str,voice_type : VoiceType,index : int):
+    def _put_tts_voice(self,id : str,new_audio : bytes, mime_type : str,voice_type : VoiceType,index : int):
         dest=self.Buckets.getTTSBucketPath(id,voice_type,index)
         buffered_audio=io.BytesIO()
         buffered_audio.write(new_audio)
@@ -70,10 +69,10 @@ class StorageService():
         buffered_audio.close()
         return result
     
-    def putTTSVoicePart(self,audio : bytes,mime_type : str,id : str,part : int):
-        return self._putTTSVoice(id,audio,mime_type,'normal',part)
+    def put_tts_voice_part(self,audio : bytes,mime_type : str,id : str,part : int):
+        return self._put_tts_voice(id,audio,mime_type,'normal',part)
     
-    def getVoice(self,id: str,index: int,voice_type : VoiceType='normal'):
+    def get_voice(self,id: str,index: int,voice_type : VoiceType='normal'):
         response=None
         try:
             response=self._client.get_object(self.Buckets.TTS.value,self.Buckets.getTTSBucketPath(id,voice_type,index))
@@ -88,37 +87,43 @@ class StorageService():
             
             response.release_conn()
     
-    def deleteVoice(self, id : str):
+    def delete_voice(self, id : str):
         for voice in t.get_args(VoiceType):
             self._client.remove_object(self.Buckets.TTS.value,f'{id}/{voice}')
             
+    def delete_all_tts_objects(self):
+        TTS_BUCKET=self.Buckets.TTS.value
+        storage_objects= self._client.list_objects(TTS_BUCKET,recursive=True)
+        objects_to_be_deleted=list(map(lambda item: DeleteObject(item.object_name),storage_objects))
+        errors=self._client.remove_objects(TTS_BUCKET,objects_to_be_deleted)
+        for error in errors:
+            return error
+            
     
-    def putRVCTTSVoice(self, rvc_audio: bytes,mime_type : str,id : str,index : int):
-        return self._putTTSVoice(id,rvc_audio,mime_type,'rvc',index)
+    def put_rvc_voice(self, rvc_audio: bytes,mime_type : str,id : str,index : int):
+        return self._put_tts_voice(id,rvc_audio,mime_type,'rvc',index)
             
 
         
-    def renovateVoice(self, id : str,item : MinioItemPart,type : VoiceType):
+    def renovate_voice(self, id : str,item : MinioItem,type : VoiceType):
         item.renovateExpiresAt()
         if type=='normal':
             item.url=self.getNormalVoiceURL(id)
             return item
   
-        item.url=self.getRVCVoiceURL(id)
+        item.url=self.get_rvc_voice_url(id)
         
         return item
     
     
     
-    def _getVoiceURL(self, id: str,voice_type : VoiceType):
-        dest=f'{id}/{voice_type}'
-        return self._client.presigned_get_object(self.Buckets.TTS.value,dest,expires=self.EXPIRE_IN)
+    def _get_voice_url(self, id: str,voice_type : VoiceType, part : int,expires_at):
+        dest=f'{id}/{voice_type}/{part}'
+        return self._client.presigned_get_object(self.Buckets.TTS.value,dest,expires=expires_at)
     
-    def getNormalVoiceURL(self, id : str):
-        return self._getVoiceURL(id,'normal')
-    
-    def getRVCVoiceURL(self, id: str):
-        return self._getVoiceURL(id,'rvc')
+    def get_rvc_voice_url(self, id: str,part : int):
+        expires_at=timedelta(hours=1)
+        return self._get_voice_url(id,'rvc',part,expires_at)
     
     
     

@@ -1,20 +1,20 @@
 from pydantic import BaseModel
 import typing as t
 from datetime import datetime
-from app.schema.voice import Voice
+from app.schema.minio import MinioItem
 from app.schema.base import Id,Now
 
 class Conversation(BaseModel):
     role: t.Literal['user','developer','assistent']='user'
     content: str | list[str]
-    voice: t.Optional[Voice]=None
+    voice: t.List[MinioItem]=[]
     
         
     
     
     
-    def has_voice(self):
-        return self.voice is not None
+    def is_voice_empty(self):
+        return self.voice.__len__()>0
     
 
     

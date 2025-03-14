@@ -6,7 +6,6 @@ from app.services.llm import LLMService
 from app.database import databaseDependency,get_collection
 from app.schema.llm import UserPrompt
 from app.schema.tts import OpenAITTSBody
-from app.schema.minio import MinioItemPart
 from app.schema.conversation import CreateConversation,ConversationWithId,UpdateConversation
 from app.services.storage import StorageServiceDependency
 from app.services.tts import OpenAITTSService
@@ -93,15 +92,22 @@ async def delete_only_voice_associated_with_conversation(conversation_service : 
     current_conversation=conversation_service.get_specific_conversation(id)
     if current_conversation==False:
         return JSONResponse(status_code=404,content={'detail': 'Conversation was not found'})
-    if not(ConversationWithId(**current_conversation).has_voice()):
+    if not(ConversationWithId(**current_conversation).is_voice_empty()):
         return JSONResponse(status_code=404,content={'detail': 'There is not voice associated with this conversation'})
-    storage_service.deleteVoice(id)
+    storage_service.delete_voice(id)
     conversation_service.delete_voice(id)
     
     
     return JSONResponse(status_code=204,content={'detail': 'Voice was deleted'})
     
+@router.delete('/all')
+async def delete_all_conversations_and_voices(conversation_service: ConversationServiceDependency,storage_service : StorageServiceDependency):
+    error=storage_service.delete_all_tts_objects()
+    if error is not None:
+        raise HTTPException(500,detail={'message': f'Failed to delete storage Objects: {error.message} '})
+    conversation_service.delete_all()
 
+    return JSONResponse(status_code=202,content={'message': 'Deleted everything'})
     
 @router.delete('/{id}')
 async def delete_conversation(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency,id : str):
@@ -109,6 +115,7 @@ async def delete_conversation(conversation_service : ConversationServiceDependen
     if result.deleted_count==0:
         raise HTTPException(500,detail={'message': 'Failed to delete conversation'})
     return JSONResponse(status_code=404,content={'detail': 'Conversation deleted'})
+
 
 
 @router.post('/{id}/voice')

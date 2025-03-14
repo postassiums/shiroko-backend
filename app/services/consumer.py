@@ -54,7 +54,7 @@ class TTSConsumer(ConsumerBase):
                 audio=tts_service.tts_stream_all_bytes()
                 self.logger.info('TTS Audio is ready')
                 mime_type=tts_service.get_mime_type()
-                storage_service.putTTSVoicePart(audio,mime_type,data.id,data.index)
+                storage_service.put_tts_voice_part(audio,mime_type,data.id,data.index)
                 self.logger.info('Audio was stored on Minio')
                 self.dispatch_rvc_job(RVCBody(index=data.index,id=data.id,total_parts=data.total_parts))
                 self.logger.info('TTS Task completed')
@@ -117,9 +117,20 @@ class RVCConsumer(ConsumerBase):
                 body_data=RVCBody(**body_data)
                 storage_service=StorageService(self.logger)
                 with SyncRVCService(self.logger) as rvc_service:
-                    tts_bytes=storage_service.getVoice(body_data.id,body_data.index,'normal')
+                    tts_bytes=storage_service.get_voice(body_data.id,body_data.index,'normal')
                     rvc_audio_bytes,rvc_audio_mime_type=rvc_service.convert_file(tts_bytes)
-                    storage_service.putRVCTTSVoice(rvc_audio_bytes,rvc_audio_mime_type,body_data.id,body_data.index)
+                    storage_service.put_rvc_voice(rvc_audio_bytes,rvc_audio_mime_type,body_data.id,body_data.index)
+                    url=storage_service.get_rvc_voice_url(body_data.id,body_data.index)
+                    
+                    new_minio_item=MinioItem(url=url)
+                    with get_db_context_manager() as db:
+                        conversations=db.get_collection('conversations')
+                        conversations.update_one({'_id': ObjectId(body_data.id)},
+                            {'$push':{
+                                'voice':
+                                    {'$each':[new_minio_item.model_dump()],'$position': body_data.index}
+                                }
+                            })
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 self.logger.info('Finished RVC Task')
                 
