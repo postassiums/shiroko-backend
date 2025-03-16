@@ -115,6 +115,15 @@ class StorageService():
         
         return item
     
+    def deleteAllVoices(self):
+        bucket=self.Buckets.TTS.value
+        objects=self._client.list_objects(bucket)
+        delete_objects=list(map(lambda x: DeletedObject(x.object_name),objects))
+        errors=self._client.remove_objects(bucket,delete_objects)
+        for error in errors:
+            return error
+        
+        return delete_objects.__len__()  
     
     
     def _get_voice_url(self, id: str,voice_type : VoiceType, part : int,expires_at):

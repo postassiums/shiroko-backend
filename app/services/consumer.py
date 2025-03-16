@@ -92,7 +92,7 @@ class TTSSplitConsumer(ConsumerBase):
                     self.logger.info('Sending to TTS queue')
                 with get_db_context_manager() as db:
                     conversations=db.get_collection('conversations')
-                    conversation.voice=Voice(total_parts=result.__len__(),full=None)
+                    conversation.voice=MinioParts(total_parts=result.__len__())
                     conversations.update_one({'_id': ObjectId(conversation.id)},{'$set':conversation.model_dump_json(include='voice')})
                 ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as e:
@@ -126,11 +126,14 @@ class RVCConsumer(ConsumerBase):
                     with get_db_context_manager() as db:
                         conversations=db.get_collection('conversations')
                         conversations.update_one({'_id': ObjectId(body_data.id)},
-                            {'$push':{
-                                'voice':
-                                    {'$each':[new_minio_item.model_dump()],'$position': body_data.index}
+                            {
+                                '$set':{'total_parts': body_data.total_parts},
+                                '$push':
+                                {
+                                'parts': {'$each':[new_minio_item.model_dump()],'$position': body_data.index}
+                                
                                 }
-                            })
+                            } )
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 self.logger.info('Finished RVC Task')
                 

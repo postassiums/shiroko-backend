@@ -1,4 +1,4 @@
-from fastapi import APIRouter,HTTPException,Query
+from fastapi import APIRouter,HTTPException,Query,WebSocket
 from fastapi.responses import StreamingResponse,JSONResponse
 from app.services.conversation import ConversationServiceDependency
 from app.services.queue import QueueServiceDependency
@@ -6,14 +6,15 @@ from app.services.llm import LLMService
 from app.database import databaseDependency,get_collection
 from app.schema.llm import UserPrompt
 from app.schema.tts import OpenAITTSBody
-from app.schema.conversation import CreateConversation,ConversationWithId,UpdateConversation
+from app.schema.conversation import *
+from app.schema.base import *
 from app.services.storage import StorageServiceDependency
 from app.services.tts import OpenAITTSService
 from app.logger import LOGGER
 from app.params import PaginationDependency
 import io
 from app.debug import *
-
+from minio.deleteobjects import DeletedObject
 router=APIRouter(prefix='/conversations',tags=['Conversations'],redirect_slashes=False)
 
 
@@ -40,7 +41,8 @@ async def create_new_conversation(conversation_service : ConversationServiceDepe
         result=conversation_service.create(conversation)
         if result==False:
             return HTTPException(404)
-        queue.dispatch_tts_splitter_job(result)
+        if result.role=='assistent':
+            queue.dispatch_tts_splitter_job(result)
         return result.model_dump(by_alias=True)
     except Exception as e:
         LOGGER.error(e)
@@ -50,7 +52,7 @@ async def create_new_conversation(conversation_service : ConversationServiceDepe
 
 
 
-@router.get('',description='List all Conversations')
+@router.get('',description='List all Conversations',response_model=Pagination[ConversationWithId])
 async def list_all_conversations(conversation_service : ConversationServiceDependency,pagination : PaginationDependency ):
     try:
         page,limit=pagination
@@ -92,7 +94,7 @@ async def delete_only_voice_associated_with_conversation(conversation_service : 
     current_conversation=conversation_service.get_specific_conversation(id)
     if current_conversation==False:
         return JSONResponse(status_code=404,content={'detail': 'Conversation was not found'})
-    if not(ConversationWithId(**current_conversation).is_voice_empty()):
+    if not(ConversationWithId(**current_conversation).has_voice()):
         return JSONResponse(status_code=404,content={'detail': 'There is not voice associated with this conversation'})
     storage_service.delete_voice(id)
     conversation_service.delete_voice(id)
@@ -116,15 +118,40 @@ async def delete_conversation(conversation_service : ConversationServiceDependen
         raise HTTPException(500,detail={'message': 'Failed to delete conversation'})
     return JSONResponse(status_code=404,content={'detail': 'Conversation deleted'})
 
+@router.delete('/all')
+async def delete_all_conversations(conversation_service : ConversationServiceDependency,storage_service : StorageServiceDependency):
+    
+    result=conversation_service.delete_all()
+    storage_result=storage_service.deleteAllVoices()
+    if isinstance(storage_result,DeletedObject):
+        return JSONResponse(status_code=500,content={'detail': f'{storage_result.code} : {storage_result.message}'})
+    
+    return JSONResponse(status_code=202,content={'detail': f'Deleted {result.deleted_count} conversations and {storage_result} voices'})
 
+@router.websocket('/{id}/voice/ws')
+async def retrieve_audio_from_conversation(web_socket : WebSocket,conversation_service : ConversationServiceDependency,
+    storage_service : StorageServiceDependency,id : str):
+    await web_socket.accept()
+    retrieve_audio=True
+    while retrieve_audio:
+        result=conversation_service.get_specific_conversation(id)
+        
+        if result.has_voice():
+            continue
+        voice=result.voice
+        i=0
+        total_parts=voice.__len__()
+        while i<total_parts:
+            web_socket.send_json(voice[i])
+            
+            i+=1
+        retrieve_audio=False
+    web_socket.close()
+            
 
-@router.post('/{id}/voice')
-async def dispatch_tts_job(conversation_service : ConversationServiceDependency,queue_service : QueueServiceDependency,id : str):
-    result=conversation_service.get_specific_conversation(id)
-    if result==False:
-        raise HTTPException(404,detail={'message': 'Conversation was not found'})   
-    queue_service.dispatch_tts_splitter_job(result)   
-    return {'message': 'Conversation job dispatched'}
+            
+            
+    
 
     
 

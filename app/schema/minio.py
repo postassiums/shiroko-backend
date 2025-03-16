@@ -29,3 +29,11 @@ class MinioItem(BaseModel):
         self.url=new_url
         self.expires_at= new_expiration if new_expiration is not None else self.getNewExpirationDate()
         return self
+    
+    
+class MinioParts(BaseModel):
+    parts: t.List[MinioItem]=[]
+    total_parts: int
+    
+    def has_parts(self):
+        return self.parts>0
