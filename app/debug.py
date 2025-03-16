@@ -5,10 +5,6 @@ import os
 # To debug something call this function and then place a breakpoint with: debugpy.breakpoint()
 
 
-def start_debug_session():
-    port = os.getenv("DEBUGGER_PORT")
-    if port is None:
-        port = 9013
-        print(f"Warning! DEBUG_PORT was not specified defaulting to: {port}")
-    debugpy.listen(("0.0.0.0", int(port)))
+def start_debug_session(port : int=9013):
+    debugpy.listen(("0.0.0.0", port))
     debugpy.wait_for_client()

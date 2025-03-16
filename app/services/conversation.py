@@ -23,9 +23,11 @@ class ConversationService():
             return False
         return ConversationWithId(**inserted_document)
     
+    
+    
     def update(self,id : str,data : UpdateConversation):
         target_id=ObjectId(id)
-        return self.conversations.update_one({"_id": target_id },{'$set': data.model_dump()})
+        return self.conversations.update_one({"_id": target_id },{'$set': data.model_dump(exclude_none=True,exclude=['id','_id'])})
 
     def delete_voice(self,id :str):
         return self.conversations.update_one({'_id': ObjectId(id)},{'$set': {'voice': None}})  

@@ -63,9 +63,23 @@ async def list_all_conversations(conversation_service : ConversationServiceDepen
         return HTTPException(500)
 
 
+@router.post('/{id}/voice/renovate',response_model=None)
+async def renovate_expired_voice_of_conversation(conversation_service : ConversationServiceDependency,
+    storage_service : StorageServiceDependency, id : str):
+    found=conversation_service.get_specific_conversation(id)
+    if found==False:
+        return HTTPException(404,detail={'message': 'No conversation found'})
+    for index,part in enumerate(found.voice.parts):
+        if part.has_expired():
+            new_url=storage_service.sign_rvc_voice_url(id,index)
+            part.renovate_expired_at()   
+            part.url=new_url
+    update_data=UpdateConversation(**found.model_dump(include=['id','voice'],by_alias=True))
+    conversation_service.update(id,update_data)
+    return found.model_dump(by_alias=True)
 
 
-@router.post('/{id}',response_model=ConversationWithId)
+@router.put('/{id}',response_model=ConversationWithId)
 async def update_existing_conversation_by_id(conversation_service : ConversationServiceDependency,id : str,new_data : CreateConversation):
     conversation_service.update(id,new_data)
 
@@ -129,20 +143,19 @@ async def delete_all_conversations(conversation_service : ConversationServiceDep
     return JSONResponse(status_code=202,content={'detail': f'Deleted {result.deleted_count} conversations and {storage_result} voices'})
 
 @router.websocket('/{id}/voice/ws')
-async def retrieve_audio_from_conversation(web_socket : WebSocket,conversation_service : ConversationServiceDependency,
-    storage_service : StorageServiceDependency,id : str):
+async def retrieve_audio_from_conversation(web_socket : WebSocket,conversation_service : ConversationServiceDependency,id : str):
     await web_socket.accept()
     retrieve_audio=True
     while retrieve_audio:
         result=conversation_service.get_specific_conversation(id)
         
-        if result.has_voice():
+        if result.has_voice() and result.voice.has_parts():
             continue
         voice=result.voice
         i=0
-        total_parts=voice.__len__()
+        total_parts=result.voice.total_parts
         while i<total_parts:
-            web_socket.send_json(voice[i])
+            web_socket.send_json(voice.parts[i])
             
             i+=1
         retrieve_audio=False

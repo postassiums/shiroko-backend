@@ -12,6 +12,8 @@ services:
     container_name: tts_splitter_consumer
     hostname: tts.splitter
     image: tts_splitter
+    ports:
+      - 9015:9015
     depends_on:
       queue:
         condition: service_healthy
@@ -26,6 +28,8 @@ services:
     container_name: tts_consumer
     image: tts_consumer
     hostname: tts.consumer
+    ports:
+      - 9014:9014
     depends_on:
       tts_splitter:
         condition: service_started
@@ -43,6 +47,8 @@ services:
     container_name: rvc_consumer
     hostname: rvc.consumer
     image: rvc_consumer
+    ports:
+      - 9016:9016
     depends_on:
       tts_consumer:
         condition: service_started

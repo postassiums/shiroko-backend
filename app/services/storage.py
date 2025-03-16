@@ -106,12 +106,12 @@ class StorageService():
 
         
     def renovate_voice(self, id : str,item : MinioItem,type : VoiceType):
-        item.renovateExpiresAt()
+        item.renovate_expired_at()
         if type=='normal':
             item.url=self.getNormalVoiceURL(id)
             return item
   
-        item.url=self.get_rvc_voice_url(id)
+        item.url=self.sign_rvc_voice_url(id)
         
         return item
     
@@ -130,7 +130,7 @@ class StorageService():
         dest=f'{id}/{voice_type}/{part}'
         return self._client.presigned_get_object(self.Buckets.TTS.value,dest,expires=expires_at)
     
-    def get_rvc_voice_url(self, id: str,part : int):
+    def sign_rvc_voice_url(self, id: str,part : int):
         expires_at=timedelta(hours=1)
         return self._get_voice_url(id,'rvc',part,expires_at)
     

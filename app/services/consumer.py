@@ -86,14 +86,18 @@ class TTSSplitConsumer(ConsumerBase):
                 split_result=re.split(pattern,conversation.content)
                 result=[x.strip() for x in list(filter(None,split_result))]
                 total_parts=result.__len__()
+                with get_db_context_manager() as db:
+                    conversations=db.get_collection('conversations')
+                    conversation.voice=MinioParts(total_parts=result.__len__())
+                    updated_fields=conversation.model_dump(include='voice')
+                    self.logger.info(f'updated_field: {updated_fields} ')
+                    conversations.update_one({'_id': ObjectId(conversation.id)},{'$set': updated_fields })
+                    self.logger.info('Voice updated')
                 for index,message in enumerate(result):
                     new_data=SplitTTSBody(index=index,content=message,id=conversation.id,total_parts=total_parts)
                     self.dispatch_tts_job(new_data)
                     self.logger.info('Sending to TTS queue')
-                with get_db_context_manager() as db:
-                    conversations=db.get_collection('conversations')
-                    conversation.voice=MinioParts(total_parts=result.__len__())
-                    conversations.update_one({'_id': ObjectId(conversation.id)},{'$set':conversation.model_dump_json(include='voice')})
+                
                 ch.basic_ack(delivery_tag=method.delivery_tag)
             except Exception as e:
                 self.logger.critical(e)
@@ -120,17 +124,19 @@ class RVCConsumer(ConsumerBase):
                     tts_bytes=storage_service.get_voice(body_data.id,body_data.index,'normal')
                     rvc_audio_bytes,rvc_audio_mime_type=rvc_service.convert_file(tts_bytes)
                     storage_service.put_rvc_voice(rvc_audio_bytes,rvc_audio_mime_type,body_data.id,body_data.index)
-                    url=storage_service.get_rvc_voice_url(body_data.id,body_data.index)
+                    url=storage_service.sign_rvc_voice_url(body_data.id,body_data.index)
                     
                     new_minio_item=MinioItem(url=url)
                     with get_db_context_manager() as db:
+                        
                         conversations=db.get_collection('conversations')
                         conversations.update_one({'_id': ObjectId(body_data.id)},
                             {
-                                '$set':{'total_parts': body_data.total_parts},
+                                
+                                '$set':{'voice.total_parts': body_data.total_parts},
                                 '$push':
                                 {
-                                'parts': {'$each':[new_minio_item.model_dump()],'$position': body_data.index}
+                                'voice.parts': {'$each':[new_minio_item.model_dump()],'$position': body_data.index}
                                 
                                 }
                             } )

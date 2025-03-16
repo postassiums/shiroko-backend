@@ -15,7 +15,7 @@ class MinioItem(BaseModel):
     def has_expired(self):
         return self.expires_at>=datetime.now()
     
-    def renovateExpiresAt(self):
+    def renovate_expired_at(self):
         self.expires_at=MinioItem.getNewExpirationDate()
         
     @classmethod 

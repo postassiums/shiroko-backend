@@ -4,6 +4,7 @@ from datetime import datetime
 from app.schema.minio import MinioParts
 from app.schema.base import Id,Now
 
+
 class Conversation(BaseModel):
     role: t.Literal['user','developer','assistent']='user'
     content: str | list[str]
@@ -28,7 +29,10 @@ class Conversation(BaseModel):
 class CreateConversation(Conversation):
     created_at : datetime=Now
 
-class UpdateConversation(Conversation):
+class UpdateConversation(BaseModel):
+    role: t.Optional[t.Literal['user','developer','assistent']]=None
+    content: t.Optional[str | list[str]]=None
+    voice: t.Optional[MinioParts]=None
     updated_at: datetime=Now 
 
 
